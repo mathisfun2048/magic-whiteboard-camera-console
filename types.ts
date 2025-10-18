@@ -4,7 +4,15 @@ import type Peer from 'peerjs';
 declare global {
   interface Window {
     Peer: typeof Peer;
+    QRCode: {
+      toCanvas(
+        canvas: HTMLCanvasElement,
+        text: string,
+        options: object,
+        callback: (error: any) => void
+      ): void;
+    };
   }
 }
 
-export type ConnectionStatus = 'idle' | 'connecting' | 'streaming' | 'error';
+export type ConnectionStatus = 'initializing' | 'waiting' | 'connecting' | 'streaming' | 'error';

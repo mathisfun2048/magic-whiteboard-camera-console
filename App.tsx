@@ -1,44 +1,79 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Peer } from 'peerjs';
 import StreamDisplay from './components/CameraView';
 import type { ConnectionStatus } from './types';
 
+// --- QR Code Component ---
+const QRCodeDisplay: React.FC<{ value: string }> = ({ value }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isQrLibLoaded, setIsQrLibLoaded] = useState(typeof window.QRCode !== 'undefined');
+
+  // Effect to check for the QR code library loading
+  useEffect(() => {
+    if (isQrLibLoaded) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      if (typeof window.QRCode !== 'undefined') {
+        setIsQrLibLoaded(true);
+        clearInterval(interval);
+      }
+    }, 100);
+
+    // Cleanup on unmount
+    return () => clearInterval(interval);
+  }, [isQrLibLoaded]);
+
+  // Effect to generate the QR code once the library and value are ready
+  useEffect(() => {
+    if (canvasRef.current && value && isQrLibLoaded) {
+      window.QRCode.toCanvas(canvasRef.current, value, { width: 256, margin: 1 }, (error) => {
+        if (error) console.error("QRCode generation failed:", error);
+      });
+    }
+  }, [value, isQrLibLoaded]);
+
+  // Render a placeholder while the library is loading
+  if (!isQrLibLoaded) {
+    return (
+      <div 
+        className="w-[256px] h-[256px] bg-gray-700 flex items-center justify-center rounded-lg animate-pulse"
+        aria-label="Loading QR Code"
+      >
+        <p className="text-white text-sm">Loading QR Code...</p>
+      </div>
+    );
+  }
+
+  return <canvas ref={canvasRef} className="rounded-lg w-[256px] h-[256px]" />;
+};
+
+
 // --- Caster (Phone) Component ---
-const CasterView: React.FC = () => {
-  const [status, setStatus] = useState<ConnectionStatus>('connecting');
+const CasterView: React.FC<{ consoleId: string | null }> = ({ consoleId }) => {
+  const [status, setStatus] = useState<ConnectionStatus>('initializing');
   const [error, setError] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
-  const [peerId, setPeerId] = useState<string | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
+    if (!consoleId) {
+      setError("Invalid URL. Please scan a QR code from the console.");
+      setStatus('error');
+      return;
+    }
+
     const peer = new window.Peer();
     peerRef.current = peer;
 
-    peer.on('open', (id) => {
-      console.log('Caster PeerJS ID:', id);
-      setPeerId(id);
-      setStatus('idle');
-      getStream(facingMode);
+    peer.on('open', () => {
+      console.log('Caster PeerJS opened');
+      getStream(facingMode); // Trigger camera access
     });
 
-    peer.on('call', call => {
-      setStatus('streaming');
-      console.log('Receiving call, answering with stream');
-      if (localStream) {
-        call.answer(localStream);
-      }
-      call.on('close', () => {
-        setStatus('idle');
-      });
-      call.on('error', (err) => {
-        setError(`Call error: ${err.message}`);
-        setStatus('error');
-      });
-    });
-    
     peer.on('error', (err) => {
       console.error('PeerJS error:', err);
       setError('Connection error. Please refresh and try again.');
@@ -49,14 +84,43 @@ const CasterView: React.FC = () => {
       peer.destroy();
       localStream?.getTracks().forEach(track => track.stop());
     };
-  }, [localStream]); // Re-attach listener if stream changes
+  }, [consoleId]); // Only run on mount
+
+  useEffect(() => {
+    if (localStream && peerRef.current?.open && consoleId) {
+        setStatus('connecting');
+        console.log(`Calling console: ${consoleId}`);
+        const call = peerRef.current.call(consoleId, localStream);
+
+        call.on('stream', () => { // The console should not stream back, but we handle it.
+            // This is unexpected, but we can log it.
+            console.log('Received stream from console unexpectedly.');
+        });
+        
+        call.on('close', () => {
+            setStatus('waiting');
+            setError('Connection closed by console.');
+        });
+        
+        call.on('error', (err) => {
+            console.error('Call error:', err);
+            setError(`Call failed: ${err.message}`);
+            setStatus('error');
+        });
+
+        // We can assume streaming once the call is made
+        setStatus('streaming');
+    }
+  }, [localStream, consoleId]); // Run when stream is ready
+
 
   const getStream = async (mode: 'user' | 'environment') => {
     try {
+      // Stop previous stream before getting a new one
       localStream?.getTracks().forEach(track => track.stop());
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { exact: mode } },
+        video: { facingMode: { ideal: mode } },
         audio: false,
       });
       setLocalStream(stream);
@@ -65,20 +129,8 @@ const CasterView: React.FC = () => {
       }
     } catch (err) {
       console.error('getUserMedia error:', err);
-      // Try again without exact
-       try {
-         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: mode },
-            audio: false,
-         });
-         setLocalStream(stream);
-         if (videoRef.current) {
-           videoRef.current.srcObject = stream;
-         }
-       } catch (e) {
-          setError('Could not access camera. Please check permissions.');
-          setStatus('error');
-       }
+      setError('Could not access camera. Please check permissions and refresh.');
+      setStatus('error');
     }
   };
 
@@ -91,9 +143,10 @@ const CasterView: React.FC = () => {
   const getStatusMessage = () => {
     if (error) return `Error: ${error}`;
     switch (status) {
-      case 'connecting': return 'Initializing Peer...';
+      case 'initializing': return 'Initializing Camera...';
+      case 'connecting': return 'Connecting to Console...';
       case 'streaming': return 'Streaming';
-      case 'idle': return 'Waiting for console to connect...';
+      case 'waiting': return 'Disconnected. Waiting for console.';
       default: return 'Starting...';
     }
   };
@@ -101,16 +154,10 @@ const CasterView: React.FC = () => {
   return (
     <div className="fixed inset-0 bg-black flex flex-col items-center justify-center text-white">
       <video ref={videoRef} muted autoPlay playsInline className="w-full h-full object-cover"></video>
-      <div className="absolute top-0 left-0 right-0 p-4 bg-black bg-opacity-60 text-center space-y-2">
-         <p className={`text-lg font-bold ${status === 'streaming' ? 'text-green-400' : 'text-yellow-400'}`}>
+      <div className="absolute top-0 left-0 right-0 p-4 bg-black bg-opacity-60 text-center">
+         <p className={`text-lg font-bold ${status === 'streaming' ? 'text-green-400' : status === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>
           {getStatusMessage()}
         </p>
-        {peerId && status === 'idle' && (
-          <div className="bg-gray-800 p-2 rounded-lg">
-            <p className="text-sm text-gray-300">Your Camera ID:</p>
-            <p className="text-lg font-mono tracking-wider break-all">{peerId}</p>
-          </div>
-        )}
       </div>
       <div className="absolute bottom-0 left-0 right-0 p-4 flex justify-center">
         <button
@@ -132,58 +179,56 @@ const CasterView: React.FC = () => {
 const ConnectionManager: React.FC<{ label: string }> = ({ label }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [peerId, setPeerId] = useState<string | null>(null);
-  const [remotePeerId, setRemotePeerId] = useState('');
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [status, setStatus] = useState<ConnectionStatus>('idle');
+  const [status, setStatus] = useState<ConnectionStatus>('initializing');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Use a unique prefix to avoid ID collisions if both console pages are open
-    const p = new window.Peer(`magic-whiteboard-console-${label.replace(/\s+/g, '')}-${Math.random().toString(36).substr(2, 9)}`);
-    setPeer(p);
+  const connectionUrl = useMemo(() => {
+    if (!peerId) return null;
+    const url = new URL(window.location.href);
+    url.search = `?caster=true&consoleId=${peerId}`;
+    return url.toString();
+  }, [peerId]);
 
-    p.on('open', id => setPeerId(id));
+  useEffect(() => {
+    const p = new window.Peer();
+    setPeer(p);
+    setStatus('initializing');
+
+    p.on('open', id => {
+      setPeerId(id);
+      setStatus('waiting');
+    });
+
+    p.on('call', call => {
+      setStatus('connecting');
+      console.log(`Incoming call from ${call.peer}`);
+      // Answer the call, sending no stream of our own.
+      call.answer(); 
+      call.on('stream', remoteStream => {
+        setStream(remoteStream);
+        setStatus('streaming');
+      });
+      call.on('close', () => {
+        setStream(null);
+        setStatus('waiting');
+      });
+      call.on('error', err => {
+        console.error('Call error:', err);
+        setError('Connection with camera failed.');
+        setStatus('error');
+      });
+    });
     
     p.on('error', err => {
       console.error(`PeerJS error for ${label}:`, err);
-      setError('Connection failed. Check the ID and network.');
+      setError('A connection error occurred. Try refreshing.');
       setStatus('error');
     });
 
     return () => p.destroy();
   }, [label]);
 
-  const handleConnect = () => {
-    if (!peer || !remotePeerId.trim()) {
-      setError('Please enter a valid camera ID.');
-      return;
-    }
-    setError(null);
-    setStatus('connecting');
-    // Call the caster. We don't send a stream, we expect one back.
-    const call = peer.call(remotePeerId.trim(), new MediaStream());
-
-    call.on('stream', remoteStream => {
-      setStream(remoteStream);
-      setStatus('streaming');
-    });
-
-    call.on('close', () => {
-      setStream(null);
-      setStatus('idle');
-    });
-
-    call.on('error', err => {
-      console.error('Call error:', err);
-      setError('Failed to connect to camera. Please check the ID.');
-      setStatus('error');
-      // Reset after a moment
-      setTimeout(() => {
-        setStatus('idle');
-        setError(null);
-      }, 3000);
-    });
-  };
 
   if (status === 'streaming' && stream) {
     return <StreamDisplay stream={stream} label={label} />;
@@ -192,37 +237,25 @@ const ConnectionManager: React.FC<{ label: string }> = ({ label }) => {
   return (
     <StreamDisplay stream={null} label={label}>
       <div className="absolute inset-0 bg-black bg-opacity-60 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm space-y-4">
-        <h4 className="text-lg font-semibold text-white">Connect a Camera</h4>
-        <div className="w-full max-w-xs">
-          <label htmlFor={`remote-id-${label}`} className="sr-only">Enter Camera ID</label>
-          <input
-            type="text"
-            id={`remote-id-${label}`}
-            value={remotePeerId}
-            onChange={e => setRemotePeerId(e.target.value)}
-            placeholder="Enter Camera ID here"
-            className="w-full bg-gray-700 border border-gray-600 text-white text-center rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            disabled={status === 'connecting'}
-          />
-        </div>
-        <button
-          onClick={handleConnect}
-          disabled={status === 'connecting' || !remotePeerId}
-          className="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-wait transition-all"
-        >
-          {status === 'connecting' ? 'Connecting...' : 'Connect'}
-        </button>
-        {error && <p className="text-sm text-red-400 mt-2">{error}</p>}
-        {peerId && (
-            <p className="mt-4 text-xs text-gray-500 break-all px-2">
-                Console ID: {peerId}
-            </p>
+        {status === 'waiting' && connectionUrl ? (
+          <>
+            <h4 className="text-lg font-semibold text-white">Scan to Connect Camera</h4>
+            <div className="p-2 bg-white rounded-lg shadow-2xl">
+              <QRCodeDisplay value={connectionUrl} />
+            </div>
+            <p className="text-sm text-gray-400 max-w-xs">Open your phone's camera and point it here to connect.</p>
+          </>
+        ) : status === 'initializing' ? (
+          <p className="text-lg font-semibold text-white">Initializing...</p>
+        ) : status === 'connecting' ? (
+          <p className="text-lg font-semibold text-white">Camera is connecting...</p>
+        ) : (
+          <p className="text-lg font-semibold text-red-400">{error || "An unknown error occurred."}</p>
         )}
       </div>
     </StreamDisplay>
   );
 };
-
 
 // --- Console (Laptop) Component ---
 const ConsoleView: React.FC = () => {
@@ -236,63 +269,22 @@ const ConsoleView: React.FC = () => {
   );
 };
 
-
-// --- Landing Page Component ---
-const LandingView: React.FC<{ onSelectMode: (mode: 'console' | 'caster') => void }> = ({ onSelectMode }) => {
-  return (
-    <div className="text-center p-8 bg-gray-800 rounded-xl shadow-2xl max-w-2xl mx-auto">
-      <h2 className="text-3xl font-bold mb-4 text-white">Choose Your Role</h2>
-      <p className="text-gray-400 mb-8">
-        Set up one device as the Console (your computer) and another as the Camera (your phone).
-      </p>
-
-      <div className="flex flex-col md:flex-row gap-6 justify-center">
-        <button
-          onClick={() => onSelectMode('console')}
-          className="px-8 py-4 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500 transition-transform transform hover:scale-105 text-lg"
-        >
-          Start Console
-          <span className="block text-sm font-normal text-indigo-200">(On this Computer)</span>
-        </button>
-        <button
-          onClick={() => onSelectMode('caster')}
-          className="px-8 py-4 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-green-500 transition-transform transform hover:scale-105 text-lg"
-        >
-          Start Camera
-          <span className="block text-sm font-normal text-green-200">(On Your Phone)</span>
-        </button>
-      </div>
-       <div className="text-left bg-gray-900 p-4 rounded-lg space-y-3 mt-8 border border-gray-700">
-          <p><span className="font-bold text-indigo-400">Step 1:</span> Open this webpage on both your computer and your phone.</p>
-          <p><span className="font-bold text-indigo-400">Step 2:</span> Click "Start Console" on your computer.</p>
-          <p><span className="font-bold text-indigo-400">Step 3:</span> Click "Start Camera" on your phone. It will show a Camera ID.</p>
-          <p><span className="font-bold text-indigo-400">Step 4:</span> Type the phone's Camera ID into an input box on the computer and click "Connect".</p>
-      </div>
-    </div>
-  );
-};
-
 // --- Main App Component (Router) ---
 const App: React.FC = () => {
-  const [mode, setMode] = useState<'landing' | 'console' | 'caster'>('landing');
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const isCaster = urlParams.get('caster') === 'true';
+  const consoleId = urlParams.get('consoleId');
 
   const renderContent = () => {
-    switch(mode) {
-      case 'console':
-        return <ConsoleView />;
-      case 'caster':
-        return <CasterView />;
-      case 'landing':
-      default:
-        return <LandingView onSelectMode={setMode} />;
+    if (isCaster) {
+      return <CasterView consoleId={consoleId} />;
     }
+    return <ConsoleView />;
   };
-  
-  const isCasterMode = mode === 'caster';
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 flex flex-col items-center justify-center p-4 md:p-8 font-sans">
-      {!isCasterMode && (
+      {!isCaster && (
         <header className="text-center mb-8">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white">
               Magic Whiteboard <span className="text-indigo-400">Camera Console</span>
