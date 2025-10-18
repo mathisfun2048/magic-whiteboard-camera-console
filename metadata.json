@@ -1,0 +1,8 @@
+
+{
+  "name": "Magic Whiteboard Camera Console",
+  "description": "A web application to consolidate and display two camera streams side-by-side, designed for computer vision analysis of a magic whiteboard. Users can select from available video devices to set up their monitoring console.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
