@@ -188,8 +188,8 @@ const WhiteboardCV: React.FC<WhiteboardCVProps> = ({ stream, label = 'Camera Vie
                     const y = (c.doubleAt(0,1) + c.doubleAt(0,3) + c.doubleAt(0,5) + c.doubleAt(0,7)) / 4.0;
                     if (!fiducialCenters) fiducialCenters = [];
                     fiducialCenters[id] = { x: Math.round(x), y: Math.round(y) };
+                    c.delete();
                   }
-                  c.delete();
                 }
                 // draw ids text
                 viewCtx.fillStyle = 'lime';
