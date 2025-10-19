@@ -103,7 +103,7 @@ const WhiteboardCV: React.FC<WhiteboardCVProps> = ({ stream, label = 'Camera Vie
         const kernel = cv.Mat.ones(7, 7, cv.CV_8U);
 
         // For aruco detection
-        const arucoDict = hasAruco ? cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X_4_50 || cv.aruco.DICT_4X4_50) : null;
+        const arucoDict = hasAruco ? cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_50) : null;
         const detectorParams = hasAruco ? new cv.aruco.DetectorParameters() : null;
 
         const smoothAppend = (p: {x:number, y:number} | null) => {
