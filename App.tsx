@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Peer } from 'peerjs';
 import StreamDisplay from './components/CameraView';
-import WhiteboardCV from './components/WhiteboardCV';
-import WhiteboardDisplay from './components/WhiteboardDisplay';
 import type { ConnectionStatus } from './types';
 
 // --- QR Code Component ---
@@ -200,9 +198,8 @@ const generateReadableId = () => {
 // --- Console Connection Manager Component ---
 const ConnectionManager: React.FC<{ 
   label: string, 
-  enableCV?: boolean,
   onStreamChange?: (stream: MediaStream | null) => void
-}> = ({ label, enableCV = false, onStreamChange }) => {
+}> = ({ label, onStreamChange }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [peerId, setPeerId] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -269,9 +266,6 @@ const ConnectionManager: React.FC<{
 
 
   if (status === 'streaming' && stream) {
-    if (enableCV) {
-      return <WhiteboardCV stream={stream} label={label} />;
-    }
     return <StreamDisplay stream={stream} label={label} />;
   }
 
@@ -304,20 +298,13 @@ const ConsoleView: React.FC = () => {
   const [stream1, setStream1] = useState<MediaStream | null>(null);
   const [stream2, setStream2] = useState<MediaStream | null>(null);
   
-  // Show whiteboard when both cameras are connected
-  const showWhiteboard = stream1 !== null && stream2 !== null;
-  
-  if (showWhiteboard) {
-    return <WhiteboardDisplay stream1={stream1} stream2={stream2} />;
-  }
-  
   return (
      <div className="w-full max-w-7xl flex flex-col items-center">
         <header className="text-center mb-8">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white">
-              Magic Whiteboard <span className="text-indigo-400">Camera Console</span>
+              Dual Camera <span className="text-indigo-400">Video Stream</span>
             </h1>
-            <p className="mt-2 text-lg text-gray-400">Dual camera P2P streaming for computer vision projects.</p>
+            <p className="mt-2 text-lg text-gray-400">Connect two phones to stream video side-by-side.</p>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full px-4 md:px-0">
           <ConnectionManager label="Camera 1 (Left)" onStreamChange={setStream1} />
@@ -332,9 +319,9 @@ const LandingPage: React.FC<{ onSelectRole: (role: 'console' | 'caster') => void
     return (
         <div className="text-center">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white">
-              Magic Whiteboard <span className="text-indigo-400">Camera Console</span>
+              Dual Camera <span className="text-indigo-400">Video Stream</span>
             </h1>
-            <p className="mt-2 text-lg text-gray-400 mb-12">Dual camera P2P streaming for computer vision projects.</p>
+            <p className="mt-2 text-lg text-gray-400 mb-12">Connect two phones to stream video side-by-side.</p>
             <div className="flex flex-col md:flex-row gap-4 justify-center">
                 <button
                     onClick={() => onSelectRole('console')}
