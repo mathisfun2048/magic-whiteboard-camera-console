@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Peer } from 'peerjs';
 import StreamDisplay from './components/CameraView';
+import WhiteboardCV from './components/WhiteboardCV';
 import type { ConnectionStatus } from './types';
 
 // --- QR Code Component ---
@@ -196,7 +197,7 @@ const generateReadableId = () => {
 }
 
 // --- Console Connection Manager Component ---
-const ConnectionManager: React.FC<{ label: string }> = ({ label }) => {
+const ConnectionManager: React.FC<{ label: string, enableCV?: boolean }> = ({ label, enableCV = false }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [peerId, setPeerId] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -250,6 +251,9 @@ const ConnectionManager: React.FC<{ label: string }> = ({ label }) => {
 
 
   if (status === 'streaming' && stream) {
+    if (enableCV) {
+      return <WhiteboardCV stream={stream} label={label} />;
+    }
     return <StreamDisplay stream={stream} label={label} />;
   }
 
@@ -288,7 +292,7 @@ const ConsoleView: React.FC = () => {
             <p className="mt-2 text-lg text-gray-400">Dual camera P2P streaming for computer vision projects.</p>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full px-4 md:px-0">
-          <ConnectionManager label="Camera 1 (Left)" />
+          <ConnectionManager label="Camera 1 (Left)" enableCV />
           <ConnectionManager label="Camera 2 (Right)" />
         </div>
      </div>
