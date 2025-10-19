@@ -12,6 +12,8 @@ declare global {
         callback: (error: any) => void
       ): void;
     };
+    // OpenCV.js global loaded from CDN
+    cv: any;
   }
 }
 
