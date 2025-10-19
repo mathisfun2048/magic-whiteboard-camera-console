@@ -43,6 +43,11 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
   
   const drawFiducialMarkers = useCallback((ctx: CanvasRenderingContext2D, cv: any) => {
     try {
+      if (!cv || !cv.aruco || !cv.aruco.getPredefinedDictionary) {
+        console.error('ArUco not available for drawing markers');
+        return false;
+      }
+
       const dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_50);
       const fiducialPositions = [
         { id: 0, x: margin, y: margin },
@@ -53,32 +58,41 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
       
       for (const pos of fiducialPositions) {
         const marker = new cv.Mat();
-        cv.aruco.drawMarker(dict, pos.id, markerSize, marker, 1);
-        const markerRGBA = new cv.Mat();
-        cv.cvtColor(marker, markerRGBA, cv.COLOR_GRAY2RGBA);
-        const imgData = matToImageData(markerRGBA);
-        
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = markerSize;
-        tmpCanvas.height = markerSize;
-        const tmpCtx = tmpCanvas.getContext('2d')!;
-        tmpCtx.putImageData(imgData, 0, 0);
-        
-        // Add white background for better contrast
-        ctx.fillStyle = 'white';
-        ctx.fillRect(pos.x - 10, pos.y - 10, markerSize + 20, markerSize + 20);
-        ctx.drawImage(tmpCanvas, pos.x, pos.y);
-        
-        // Add marker ID label
-        ctx.fillStyle = 'black';
-        ctx.font = '16px Arial';
-        ctx.fillText(`ID: ${pos.id}`, pos.x, pos.y - 15);
-        
-        markerRGBA.delete();
-        marker.delete();
+        try {
+          cv.aruco.drawMarker(dict, pos.id, markerSize, marker, 1);
+          const markerRGBA = new cv.Mat();
+          cv.cvtColor(marker, markerRGBA, cv.COLOR_GRAY2RGBA);
+          const imgData = matToImageData(markerRGBA);
+          
+          const tmpCanvas = document.createElement('canvas');
+          tmpCanvas.width = markerSize;
+          tmpCanvas.height = markerSize;
+          const tmpCtx = tmpCanvas.getContext('2d')!;
+          tmpCtx.putImageData(imgData, 0, 0);
+          
+          // Add white background for better contrast
+          ctx.fillStyle = 'white';
+          ctx.fillRect(pos.x - 10, pos.y - 10, markerSize + 20, markerSize + 20);
+          ctx.drawImage(tmpCanvas, pos.x, pos.y);
+          
+          // Add marker ID label
+          ctx.fillStyle = 'black';
+          ctx.font = '16px Arial';
+          ctx.fillText(`ID: ${pos.id}`, pos.x, pos.y - 15);
+          
+          markerRGBA.delete();
+        } catch (e) {
+          console.error(`Failed to draw marker ${pos.id}:`, e);
+        } finally {
+          marker.delete();
+        }
       }
+      
+      dict.delete();
+      return true;
     } catch (e) {
       console.error('Failed to draw ArUco markers:', e);
+      return false;
     }
   }, [canvasWidth, canvasHeight, markerSize, margin]);
   
@@ -91,15 +105,20 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
       try {
         setStatus('Loading Computer Vision Library...');
         await loadOpenCV();
-        setIsOpenCVLoaded(true);
         
-        const hasAruco = await ensureArucoAvailable();
-        if (!hasAruco) {
-          setStatus('ERROR: ArUco module not available');
+        const cv: any = (window as any).cv;
+        if (!cv) {
+          setStatus('ERROR: OpenCV not loaded');
           return;
         }
         
-        const cv: any = (window as any).cv;
+        setIsOpenCVLoaded(true);
+        
+        const hasAruco = await ensureArucoAvailable();
+        if (!hasAruco || !cv.aruco) {
+          setStatus('ERROR: ArUco module not available');
+          return;
+        }
         
         // Setup videos with error handling
         if (videoRef1.current && stream1) {
@@ -129,8 +148,13 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         whiteboardCtx.fillStyle = 'white';
         whiteboardCtx.fillRect(0, 0, canvasWidth, canvasHeight);
         
-        // Draw fiducial markers immediately
-        drawFiducialMarkers(whiteboardCtx, cv);
+        // Draw fiducial markers with proper error handling
+        const markersDrawn = drawFiducialMarkers(whiteboardCtx, cv);
+        if (!markersDrawn) {
+          setStatus('ERROR: Failed to draw fiducial markers');
+          return;
+        }
+        
         setStatus('✅ Whiteboard ready! Point cameras at all 4 corner markers...');
         
         // Create processing canvases for each camera
@@ -157,13 +181,13 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         const hsv2 = new cv.Mat();
         const mask2 = new cv.Mat();
         
-        const kernel = cv.Mat.ones(5, 5, cv.CV_8U); // Smaller kernel for better performance
+        const kernel = cv.Mat.ones(5, 5, cv.CV_8U);
         
         // ArUco detection setup
         const arucoDict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_50);
         const detectorParams = new cv.aruco.DetectorParameters();
         
-        // Green color range for HSV (optimized for better detection)
+        // Green color range for HSV
         const lowerScalar = new cv.Scalar(35, 40, 40, 0);
         const upperScalar = new cv.Scalar(85, 255, 255, 255);
         
@@ -245,7 +269,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
           ids.delete();
           rejected.delete();
           
-          // Check if all 4 markers detected
           if (centers.length === 4 && centers[0] && centers[1] && centers[2] && centers[3]) {
             return centers;
           }
@@ -276,7 +299,7 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
               cnt.delete();
             }
             
-            if (largestIdx >= 0 && largestArea >= 100) { // Lower threshold for better detection
+            if (largestIdx >= 0 && largestArea >= 100) {
               const cnt = contours.get(largestIdx);
               const rect = cv.boundingRect(cnt);
               greenPos = { x: rect.x + Math.floor(rect.width / 2), y: rect.y + Math.floor(rect.height / 2) };
@@ -305,7 +328,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
             rgba1.data.set(imageData1.data);
             cv.cvtColor(rgba1, bgr1, cv.COLOR_RGBA2BGR);
             
-            // Try calibration if needed (every 3 frames for instant calibration)
             if (needsCalibration && frameCount % 3 === 0) {
               cv.cvtColor(bgr1, gray1, cv.COLOR_BGR2GRAY);
               const centers = detectFiducials(gray1);
@@ -317,7 +339,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
               }
             }
             
-            // Detect green
             cv.cvtColor(bgr1, hsv1, cv.COLOR_BGR2HSV);
             const greenPos1 = detectGreen(hsv1, mask1);
             
@@ -333,10 +354,9 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
                     y: Math.max(0, Math.min(canvasHeight - 1, mapped.y))
                   };
                   
-                  // Draw line from last point
                   if (lastDrawPoint1Ref.current) {
                     whiteboardCtx.save();
-                    whiteboardCtx.strokeStyle = '#3B82F6'; // Blue for camera 1
+                    whiteboardCtx.strokeStyle = '#3B82F6';
                     whiteboardCtx.lineWidth = lineWidth;
                     whiteboardCtx.lineCap = 'round';
                     whiteboardCtx.lineJoin = 'round';
@@ -364,7 +384,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
             rgba2.data.set(imageData2.data);
             cv.cvtColor(rgba2, bgr2, cv.COLOR_RGBA2BGR);
             
-            // Try calibration if needed (every 3 frames for instant calibration)
             if (needsCalibration && frameCount % 3 === 0) {
               cv.cvtColor(bgr2, gray2, cv.COLOR_BGR2GRAY);
               const centers = detectFiducials(gray2);
@@ -376,7 +395,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
               }
             }
             
-            // Detect green
             cv.cvtColor(bgr2, hsv2, cv.COLOR_BGR2HSV);
             const greenPos2 = detectGreen(hsv2, mask2);
             
@@ -392,10 +410,9 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
                     y: Math.max(0, Math.min(canvasHeight - 1, mapped.y))
                   };
                   
-                  // Draw line from last point
                   if (lastDrawPoint2Ref.current) {
                     whiteboardCtx.save();
-                    whiteboardCtx.strokeStyle = '#EF4444'; // Red for camera 2
+                    whiteboardCtx.strokeStyle = '#EF4444';
                     whiteboardCtx.lineWidth = lineWidth;
                     whiteboardCtx.lineCap = 'round';
                     whiteboardCtx.lineJoin = 'round';
@@ -415,7 +432,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
             }
           }
           
-          // Update calibration status
           const nowCalibrated = !!transformMatrix1Ref.current && !!transformMatrix2Ref.current;
           if (nowCalibrated !== isCalibrated) {
             setIsCalibrated(nowCalibrated);
@@ -437,6 +453,10 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
           rgba1.delete(); bgr1.delete(); gray1.delete(); hsv1.delete(); mask1.delete();
           rgba2.delete(); bgr2.delete(); gray2.delete(); hsv2.delete(); mask2.delete();
           kernel.delete();
+          arucoDict.delete();
+          detectorParams.delete();
+          lowerScalar.delete();
+          upperScalar.delete();
           if (transformMatrix1Ref.current) {
             try { transformMatrix1Ref.current.delete(); } catch {}
             transformMatrix1Ref.current = null;
@@ -471,7 +491,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     
-    // Redraw fiducials
     const cv: any = (window as any).cv;
     if (cv && cv.aruco) {
       drawFiducialMarkers(ctx, cv);
@@ -491,11 +510,9 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
   
   return (
     <div className="fixed inset-0 bg-black flex flex-col" ref={containerRef}>
-      {/* Hidden video elements for processing */}
       <video ref={videoRef1} muted playsInline className="hidden" />
       <video ref={videoRef2} muted playsInline className="hidden" />
       
-      {/* Minimal header for full-screen experience */}
       <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 z-10">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div className="flex items-center gap-4">
@@ -539,7 +556,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         </div>
       </div>
       
-      {/* Full-screen whiteboard canvas */}
       <div className="flex-1 flex items-center justify-center p-8 pt-20">
         <div className="relative w-full h-full max-w-[calc(100vh*16/9)] max-h-full">
           <canvas
@@ -562,7 +578,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         </div>
       </div>
       
-      {/* Bottom status bar */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between text-sm">
