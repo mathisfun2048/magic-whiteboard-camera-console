@@ -79,6 +79,7 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
       }
     } catch (e) {
       console.error('Failed to draw ArUco markers:', e);
+      throw new Error(`ArUco marker generation failed: ${e}`);
     }
   }, [canvasWidth, canvasHeight, markerSize, margin]);
   
@@ -95,9 +96,11 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         
         const hasAruco = await ensureArucoAvailable();
         if (!hasAruco) {
-          setStatus('ERROR: ArUco module not available');
+          console.error('ArUco module not available in loaded OpenCV.js build');
+          setStatus('⚠️ ERROR: ArUco markers unavailable. The whiteboard cannot calibrate without ArUco support. Please refresh and try again.');
           return;
         }
+        console.log('✅ ArUco module verified and available');
         
         const cv: any = (window as any).cv;
         
