@@ -92,7 +92,6 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
       return true;
     } catch (e) {
       console.error('Failed to draw ArUco markers:', e);
-      return false;
     }
   }, [canvasWidth, canvasHeight, markerSize, margin]);
   
@@ -115,10 +114,12 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         setIsOpenCVLoaded(true);
         
         const hasAruco = await ensureArucoAvailable();
-        if (!hasAruco || !cv.aruco) {
+        if (!hasAruco) {
           setStatus('ERROR: ArUco module not available');
           return;
         }
+        
+        const cv: any = (window as any).cv;
         
         // Setup videos with error handling
         if (videoRef1.current && stream1) {
