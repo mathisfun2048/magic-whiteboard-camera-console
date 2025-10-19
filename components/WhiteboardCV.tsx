@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { loadOpenCV, ensureArucoAvailable } from '@/lib/opencvLoader';
+import { loadOpenCV, ensureArucoAvailable } from '../lib/opencvLoader';
 
 interface WhiteboardCVProps {
   stream: MediaStream;

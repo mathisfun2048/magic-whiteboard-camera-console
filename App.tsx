@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { Peer } from 'peerjs';
 import StreamDisplay from './components/CameraView';
 import WhiteboardCV from './components/WhiteboardCV';
+import WhiteboardDisplay from './components/WhiteboardDisplay';
 import type { ConnectionStatus } from './types';
 
 // --- QR Code Component ---
@@ -197,7 +198,11 @@ const generateReadableId = () => {
 }
 
 // --- Console Connection Manager Component ---
-const ConnectionManager: React.FC<{ label: string, enableCV?: boolean }> = ({ label, enableCV = false }) => {
+const ConnectionManager: React.FC<{ 
+  label: string, 
+  enableCV?: boolean,
+  onStreamChange?: (stream: MediaStream | null) => void
+}> = ({ label, enableCV = false, onStreamChange }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [peerId, setPeerId] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -225,9 +230,22 @@ const ConnectionManager: React.FC<{ label: string, enableCV?: boolean }> = ({ la
         p.on('call', call => {
             setStatus('connecting');
             call.answer(); 
-            call.on('stream', remoteStream => { setStream(remoteStream); setStatus('streaming'); });
-            call.on('close', () => { setStream(null); setStatus('waiting'); });
-            call.on('error', err => { console.error('Call error:', err); setError('Connection with camera failed.'); setStatus('error'); });
+            call.on('stream', remoteStream => { 
+              setStream(remoteStream); 
+              setStatus('streaming');
+              if (onStreamChange) onStreamChange(remoteStream);
+            });
+            call.on('close', () => { 
+              setStream(null); 
+              setStatus('waiting');
+              if (onStreamChange) onStreamChange(null);
+            });
+            call.on('error', err => { 
+              console.error('Call error:', err); 
+              setError('Connection with camera failed.'); 
+              setStatus('error');
+              if (onStreamChange) onStreamChange(null);
+            });
         });
 
         p.on('error', err => {
@@ -283,6 +301,16 @@ const ConnectionManager: React.FC<{ label: string, enableCV?: boolean }> = ({ la
 
 // --- Console (Laptop) Component ---
 const ConsoleView: React.FC = () => {
+  const [stream1, setStream1] = useState<MediaStream | null>(null);
+  const [stream2, setStream2] = useState<MediaStream | null>(null);
+  
+  // Show whiteboard when both cameras are connected
+  const showWhiteboard = stream1 !== null && stream2 !== null;
+  
+  if (showWhiteboard) {
+    return <WhiteboardDisplay stream1={stream1} stream2={stream2} />;
+  }
+  
   return (
      <div className="w-full max-w-7xl flex flex-col items-center">
         <header className="text-center mb-8">
@@ -292,8 +320,8 @@ const ConsoleView: React.FC = () => {
             <p className="mt-2 text-lg text-gray-400">Dual camera P2P streaming for computer vision projects.</p>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full px-4 md:px-0">
-          <ConnectionManager label="Camera 1 (Left)" enableCV />
-          <ConnectionManager label="Camera 2 (Right)" />
+          <ConnectionManager label="Camera 1 (Left)" onStreamChange={setStream1} />
+          <ConnectionManager label="Camera 2 (Right)" onStreamChange={setStream2} />
         </div>
      </div>
   );
