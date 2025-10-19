@@ -2,7 +2,7 @@
 let cvLoadPromise: Promise<void> | null = null;
 let isOpenCVLoading = false;
 
-export function loadOpenCV(src: string = 'https://docs.opencv.org/4.x/opencv.js'): Promise<void> {
+export function loadOpenCV(src: string = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.2/dist/opencv.js'): Promise<void> {
   // Quick check if already loaded
   if (typeof window !== 'undefined' && (window as any).cv?.ready) {
     return Promise.resolve();

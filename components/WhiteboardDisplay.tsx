@@ -129,8 +129,9 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
         whiteboardCtx.fillStyle = 'white';
         whiteboardCtx.fillRect(0, 0, canvasWidth, canvasHeight);
         
-        // Draw fiducial markers
+        // Draw fiducial markers immediately
         drawFiducialMarkers(whiteboardCtx, cv);
+        setStatus('✅ Whiteboard ready! Point cameras at all 4 corner markers...');
         
         // Create processing canvases for each camera
         const processCanvas1 = document.createElement('canvas');
@@ -304,15 +305,15 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
             rgba1.data.set(imageData1.data);
             cv.cvtColor(rgba1, bgr1, cv.COLOR_RGBA2BGR);
             
-            // Try calibration if needed (every 10 frames for performance)
-            if (needsCalibration && frameCount % 10 === 0) {
+            // Try calibration if needed (every 3 frames for instant calibration)
+            if (needsCalibration && frameCount % 3 === 0) {
               cv.cvtColor(bgr1, gray1, cv.COLOR_BGR2GRAY);
               const centers = detectFiducials(gray1);
               if (centers) {
                 const M = computeTransform(centers);
                 if (transformMatrix1Ref.current) transformMatrix1Ref.current.delete();
                 transformMatrix1Ref.current = M;
-                setCalibrationProgress(prev => Math.min(prev + 25, 50));
+                setCalibrationProgress(50);
               }
             }
             
@@ -363,15 +364,15 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
             rgba2.data.set(imageData2.data);
             cv.cvtColor(rgba2, bgr2, cv.COLOR_RGBA2BGR);
             
-            // Try calibration if needed (every 10 frames for performance)
-            if (needsCalibration && frameCount % 10 === 0) {
+            // Try calibration if needed (every 3 frames for instant calibration)
+            if (needsCalibration && frameCount % 3 === 0) {
               cv.cvtColor(bgr2, gray2, cv.COLOR_BGR2GRAY);
               const centers = detectFiducials(gray2);
               if (centers) {
                 const M = computeTransform(centers);
                 if (transformMatrix2Ref.current) transformMatrix2Ref.current.delete();
                 transformMatrix2Ref.current = M;
-                setCalibrationProgress(prev => Math.min(prev + 25, 100));
+                setCalibrationProgress(100);
               }
             }
             
@@ -422,14 +423,14 @@ const WhiteboardDisplay: React.FC<WhiteboardDisplayProps> = ({ stream1, stream2 
               setStatus('✅ Calibrated! Use green objects to draw.');
               setCalibrationProgress(100);
             } else {
-              setStatus('📷 Point both cameras at the whiteboard corners...');
+              setStatus('🎯 Auto-calibrating... Point cameras at all 4 markers.');
             }
           }
           
           animationFrameId = requestAnimationFrame(processFrame);
         };
         
-        setStatus('📷 Point both cameras at the whiteboard corners...');
+        setStatus('🎯 Auto-calibrating... Point cameras at whiteboard corners.');
         processFrame();
         
         cleanupCV = () => {
